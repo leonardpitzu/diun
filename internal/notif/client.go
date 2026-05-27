@@ -120,3 +120,12 @@ func (c *Client) Send(entry model.NotifEntry) {
 func (c *Client) List() []notifier.Notifier {
 	return c.notifiers
 }
+
+// Close disconnects any notifiers that hold persistent connections
+func (c *Client) Close() {
+	for _, n := range c.notifiers {
+		if closer, ok := n.Handler.(notifier.Closer); ok {
+			closer.Close()
+		}
+	}
+}

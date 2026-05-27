@@ -98,6 +98,7 @@ func (di *Diun) Start(ctx context.Context) error {
 			<-di.cron.Stop().Done()
 		}
 		di.grpc.Stop()
+		di.notif.Close()
 		if err := di.db.Close(); err != nil {
 			log.Warn().Err(err).Msg("Cannot close database")
 		}

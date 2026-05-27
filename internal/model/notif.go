@@ -1,6 +1,8 @@
 package model
 
 import (
+	"sync"
+
 	"github.com/crazy-max/diun/v4/pkg/registry"
 )
 
@@ -12,6 +14,7 @@ const (
 
 // NotifEntries represents a list of notification entries
 type NotifEntries struct {
+	mu            sync.Mutex
 	Entries       []NotifEntry
 	CountNew      int
 	CountUpdate   int
@@ -63,8 +66,10 @@ func (s *Notif) SetDefaults() {
 	// noop
 }
 
-// Add adds a new notif entry
+// Add adds a new notif entry (safe for concurrent use)
 func (s *NotifEntries) Add(entry NotifEntry) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.Entries = append(s.Entries, entry)
 	switch entry.Status {
 	case ImageStatusNew:

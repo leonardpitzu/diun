@@ -8,7 +8,7 @@ import (
 
 	"github.com/crazy-max/diun/v4/internal/model"
 	"github.com/crazy-max/diun/v4/internal/notif/notifier"
-	"github.com/crazy-max/diun/v4/pkg/utl"
+	"github.com/crazy-max/diun/v4/internal/secret"
 	MQTT "github.com/eclipse/paho.mqtt.golang"
 )
 
@@ -44,12 +44,12 @@ func getLast8Chars(digest string) string {
 
 // Send creates and sends a mqtt notification with an entry
 func (c *Client) Send(entry model.NotifEntry) error {
-	username, err := utl.GetSecret(c.cfg.Username, c.cfg.UsernameFile)
+	username, err := secret.GetSecret(c.cfg.Username, c.cfg.UsernameFile)
 	if err != nil {
 		return err
 	}
 
-	password, err := utl.GetSecret(c.cfg.Password, c.cfg.PasswordFile)
+	password, err := secret.GetSecret(c.cfg.Password, c.cfg.PasswordFile)
 	if err != nil {
 		return err
 	}
@@ -74,13 +74,15 @@ func (c *Client) Send(entry model.NotifEntry) error {
 	opts.Password = password
 
 	if c.mqttClient == nil {
-		// Create the client
 		c.mqttClient = MQTT.NewClient(opts)
+	}
+	if !c.mqttClient.IsConnected() {
 		if token := c.mqttClient.Connect(); token.Wait() && token.Error() != nil {
+			c.mqttClient = nil
 			return token.Error()
 		}
 
-		// Create & publish the availability message
+		// Publish availability on (re)connect
 		if token := c.mqttClient.Publish(availabilityTopic, byte(c.cfg.QoS), true, "online"); token.Wait() && token.Error() != nil {
 			return token.Error()
 		}
@@ -108,17 +110,33 @@ func (c *Client) Send(entry model.NotifEntry) error {
 		return token.Error()
 	}
 
-	// Prepare & the state payload
-	latestVersion := getLast8Chars(entry.Manifest.Digest.String())
+	// Prepare the state payload
+	// Use image tag as the display version, fall back to digest suffix
+	latestVersion := entry.Image.Tag
+	if latestVersion == "" || latestVersion == "latest" {
+		latestVersion = getLast8Chars(entry.Manifest.Digest.String())
+	}
 	var installedVersion string
-	if len(entry.PrevManifest.Digest.String()) > 0 {
-		installedVersion = getLast8Chars(entry.PrevManifest.Digest.String())
+	if entry.PrevManifest.Digest != "" {
+		prevTag := entry.Image.Tag // same tag, different digest
+		if prevTag == "" || prevTag == "latest" {
+			installedVersion = getLast8Chars(entry.PrevManifest.Digest.String())
+		} else if entry.Status == model.ImageStatusUpdate {
+			// Tag is the same but digest changed — show digest to differentiate
+			installedVersion = getLast8Chars(entry.PrevManifest.Digest.String())
+		} else {
+			installedVersion = latestVersion
+		}
 	} else {
 		installedVersion = latestVersion
 	}
-	var statePayload = map[string]interface{}{
+
+	statePayload := map[string]interface{}{
 		"installed_version": installedVersion,
 		"latest_version":    latestVersion,
+	}
+	if entry.Image.HubLink != "" {
+		statePayload["release_url"] = entry.Image.HubLink
 	}
 	statePayloadBytes, err := json.Marshal(statePayload)
 	if err != nil {
@@ -129,4 +147,11 @@ func (c *Client) Send(entry model.NotifEntry) error {
 	}
 
 	return nil
+}
+
+// Close disconnects the MQTT client gracefully
+func (c *Client) Close() {
+	if c.mqttClient != nil && c.mqttClient.IsConnected() {
+		c.mqttClient.Disconnect(250)
+	}
 }

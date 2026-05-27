@@ -10,6 +10,11 @@ type Handler interface {
 	Send(entry model.NotifEntry) error
 }
 
+// Closer is an optional interface for notifiers that hold connections
+type Closer interface {
+	Close()
+}
+
 // Notifier represents an active notifier object
 type Notifier struct {
 	Handler
